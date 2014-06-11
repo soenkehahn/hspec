@@ -60,7 +60,7 @@ spec = do
 
     it "takes an example of that behavior" $ do
       let [SpecItem item] = runSpecM (H.it "whatever" True)
-      itemExample item defaultParams id `shouldReturn` Success
+      itemExample item defaultParams ($ ()) `shouldReturn` Success
 
     context "when no description is given" $ do
       it "uses a default description" $ do
@@ -141,6 +141,32 @@ spec = do
           readIORef ref `shouldReturn` 1
           writeIORef ref 2
       readIORef ref `shouldReturn` 3
+
+  describe "before_" $ do
+    it "makes resources available conveniently" $ do
+      silence $ H.hspec $ do
+        H.before_ (return (42 :: Integer)) $ do
+          H.it "foo" $ \ resource r2 -> do
+            resource `shouldBe` (42 :: Integer)
+            r2 `shouldBe` (42 :: Integer)
+
+    context "invoked twice" $ do
+      it "executes both setup operations" $ do
+        mock <- newMock
+        silence $ H.hspec $
+          H.before_ (mockAction mock) $
+          H.before_ (mockAction mock) $
+            H.it "foo" $
+              (return () :: Expectation)
+        mockCounter mock `shouldReturn` 2
+
+      it "passes the innermost constructed resource" $
+        silence $ H.hspec $
+          H.before_ (return (1 :: Integer)) $
+          H.before_ (return 2) $ do
+            H.it "foo" $ \ r -> do
+              r `shouldBe` (2 :: Integer)
+
   where
     runSpec :: H.Spec -> IO [String]
     runSpec = captureLines . H.hspecResult

@@ -24,6 +24,8 @@ module Test.Hspec (
 , before
 , after
 , around
+, before_
+, around_
 , parallel
 
 -- * Running a spec
@@ -57,7 +59,7 @@ context = describe
 -- > describe "absolute" $ do
 -- >   it "returns a positive number when given a negative number" $
 -- >     absolute (-1) == 1
-it :: Example a => String -> a -> Spec
+it :: Example r a => String -> a -> SpecM r ()
 it label action = fromSpecList [Core.it label action]
 
 -- | This is a type restricted version of `id`.  It can be used to get better
@@ -89,4 +91,13 @@ after action = around (`finally` action)
 
 -- | Run a custom action before and/or after every spec item.
 around :: (IO () -> IO ()) -> Spec -> Spec
-around a2 = mapSpecItem $ \item -> item {itemExample = \params a1 -> itemExample item params (a1 . a2)}
+around wrapper = around_ (\ spec -> wrapper (spec ()))
+
+before_ :: IO r -> SpecM r () -> SpecM r ()
+before_ acquire = around_ $ \ action -> do
+    acquire >>= action
+
+around_ :: ((r -> IO ()) -> IO ()) -> SpecM r () -> SpecM r ()
+around_ wrapper =
+    mapSpecItem $
+    \item -> item {itemExample = \params a1 -> itemExample item params (\ spec -> a1 (const (wrapper spec)))}

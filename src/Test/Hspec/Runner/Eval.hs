@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, ScopedTypeVariables #-}
 module Test.Hspec.Runner.Eval (runFormatter) where
 
 import           Control.Applicative
@@ -22,7 +22,7 @@ data Tree a
   | Leaf !String a
   deriving (Eq, Show, Functor)
 
-toTree :: SpecTree -> Tree Item
+toTree :: SpecTree r -> Tree (Item r)
 toTree spec = case spec of
   SpecGroup label specs -> Node label (map toTree specs)
   SpecItem item -> Leaf (itemRequirement item) item
@@ -30,7 +30,7 @@ toTree spec = case spec of
 type EvalTree = Tree (ProgressCallback -> FormatResult -> IO (FormatM ()))
 
 -- | Evaluate all examples of a given spec and produce a report.
-runFormatter :: Bool -> Handle -> Config -> Formatter -> [SpecTree] -> FormatM ()
+runFormatter :: forall r . Bool -> Handle -> Config -> Formatter -> [SpecTree r] -> FormatM ()
 runFormatter useColor h c formatter specs_ = do
   headerFormatter formatter
   chan <- liftIO newChan
@@ -44,14 +44,14 @@ runFormatter useColor h c formatter specs_ = do
 
     specs = map (fmap (parallelize . fmap (applyNoOpAround . applyQuickCheckArgs) . unwrapItem) . toTree) specs_
 
-    unwrapItem :: Item -> (Bool, Params -> (IO () -> IO ()) -> IO Result)
+    unwrapItem :: Item r -> (Bool, Params -> ((r -> IO ()) -> IO ()) -> IO Result)
     unwrapItem (Item isParallelizable _ e) = (isParallelizable, e)
 
     applyQuickCheckArgs :: (Params -> a) -> ProgressCallback -> a
     applyQuickCheckArgs e progressCallback = e $ Params (configQuickCheckArgs c) (configSmallCheckDepth c) progressCallback
 
-    applyNoOpAround :: (a -> (IO () -> IO ()) -> b) -> a -> b
-    applyNoOpAround = fmap ($ id)
+    applyNoOpAround :: (a -> ((r -> IO ()) -> IO ()) -> b) -> a -> b
+    applyNoOpAround wrap a = (wrap a) (\ spec -> spec (error "use before_ (hurra)"))
 
 -- | Execute given action at most every specified number of seconds.
 every :: POSIXTime -> (a -> b -> IO ()) -> IO (a -> b -> IO ())

@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TypeSynonymInstances, FlexibleInstances, GeneralizedNewtypeDeriving, DeriveDataTypeable #-}
+{-# LANGUAGE CPP, TypeSynonymInstances, FlexibleInstances, GeneralizedNewtypeDeriving, DeriveDataTypeable, ScopedTypeVariables, MultiParamTypeClasses #-}
 module Test.Hspec.Core.Type (
   Spec
 , SpecM (..)
@@ -40,18 +40,18 @@ import qualified Test.QuickCheck.IO ()
 import           Test.Hspec.Core.QuickCheckUtil
 import           Control.DeepSeq (deepseq)
 
-type Spec = SpecM ()
+type Spec = SpecM () ()
 
 -- | A writer monad for `SpecTree` forests.
-newtype SpecM a = SpecM (Writer [SpecTree] a)
+newtype SpecM resource a = SpecM (Writer [SpecTree resource] a)
   deriving (Functor, Applicative, Monad)
 
 -- | Convert a `Spec` to a forest of `SpecTree`s.
-runSpecM :: Spec -> [SpecTree]
+runSpecM :: SpecM r () -> [SpecTree r]
 runSpecM (SpecM specs) = execWriter specs
 
 -- | Create a `Spec` from a forest of `SpecTree`s.
-fromSpecList :: [SpecTree] -> Spec
+fromSpecList :: [SpecTree r] -> SpecM r ()
 fromSpecList = SpecM . tell
 
 -- | The result of running an example.
@@ -75,26 +75,26 @@ data Params = Params {
 }
 
 -- | Internal representation of a spec.
-data SpecTree =
-    SpecGroup String [SpecTree]
-  | SpecItem Item
+data SpecTree r =
+    SpecGroup String [SpecTree r]
+  | SpecItem (Item r)
 
-data Item = Item {
+data Item r = Item {
   itemIsParallelizable :: Bool
 , itemRequirement :: String
-, itemExample :: Params -> (IO () -> IO ()) -> IO Result
+, itemExample :: Params -> ((r -> IO ()) -> IO ()) -> IO Result
 }
 
-mapSpecItem :: (Item -> Item) -> Spec -> Spec
+mapSpecItem :: forall r . (Item r -> Item r) -> SpecM r () -> SpecM r ()
 mapSpecItem f = fromSpecList . map go . runSpecM
   where
-    go :: SpecTree -> SpecTree
+    go :: SpecTree r -> SpecTree r
     go spec = case spec of
       SpecItem item -> SpecItem (f item)
       SpecGroup d es -> SpecGroup d (map go es)
 
 -- | The @describe@ function combines a list of specs into a larger spec.
-describe :: String -> [SpecTree] -> SpecTree
+describe :: String -> [SpecTree r] -> SpecTree r
 describe s = SpecGroup msg
   where
     msg
@@ -102,7 +102,7 @@ describe s = SpecGroup msg
       | otherwise = s
 
 -- | Create a spec item.
-it :: Example a => String -> a -> SpecTree
+it :: Example r a => String -> a -> SpecTree r
 it s e = SpecItem $ Item False msg (evaluateExample e)
   where
     msg
@@ -110,24 +110,33 @@ it s e = SpecItem $ Item False msg (evaluateExample e)
       | otherwise = s
 
 -- | A type class for examples.
-class Example a where
-  evaluateExample :: a -> Params -> (IO () -> IO ()) -> IO Result
+class Example r a where
+  evaluateExample :: a -> Params -> ((r -> IO ()) -> IO ()) -> IO Result
 
-instance Example Bool where
+instance Example r a => Example r (r -> a) where
+  evaluateExample example params wrapper = do
+    ref <- newIORef (error "new io ref")
+    wrapper $ \ resource -> do
+        result <- evaluateExample (example resource) params (\ spec -> spec resource)
+        writeIORef ref result
+    readIORef ref
+
+instance Example r Bool where
   evaluateExample b _ _ = if b then return Success else return (Fail "")
 
-instance Example Expectation where
-  evaluateExample e _ action = (action e >> return Success) `E.catches` [
+instance Example r Expectation where
+  evaluateExample e _ action = (action (const e) >> return Success) `E.catches` [
       E.Handler (\(HUnitFailure err) -> return (Fail err))
     , E.Handler (return :: Result -> IO Result)
     ]
 
-instance Example Result where
+instance Example r Result where
   evaluateExample r _ _ = return r
 
-instance Example QC.Property where
+instance Example r QC.Property where
   evaluateExample p c action = do
-    r <- QC.quickCheckWithResult (paramsQuickCheckArgs c) {QC.chatty = False} (QCP.callback progressCallback $ aroundProperty action p)
+    r <- QC.quickCheckWithResult (paramsQuickCheckArgs c) {QC.chatty = False}
+        (QCP.callback progressCallback $ aroundProperty (\ spec -> action (const spec)) p)
     when (isUserInterrupt r) $ do
       E.throwIO E.UserInterrupt
 

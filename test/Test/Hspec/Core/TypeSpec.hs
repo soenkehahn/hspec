@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, FlexibleContexts #-}
 module Test.Hspec.Core.TypeSpec (main, spec) where
 
 import           Helper
@@ -14,11 +14,11 @@ import qualified Test.Hspec.Runner as H
 main :: IO ()
 main = hspec spec
 
-evaluateExample :: H.Example e => e -> IO H.Result
-evaluateExample e = H.evaluateExample e defaultParams id
+evaluateExample :: H.Example () e => e -> IO H.Result
+evaluateExample e = H.evaluateExample e defaultParams ($ ())
 
-evaluateExampleWith :: H.Example e => (IO () -> IO ()) -> e -> IO H.Result
-evaluateExampleWith action e = H.evaluateExample e defaultParams action
+evaluateExampleWith :: H.Example () e => (IO () -> IO ()) -> e -> IO H.Result
+evaluateExampleWith action e = H.evaluateExample e defaultParams (action . ($ ()))
 
 spec :: Spec
 spec = do

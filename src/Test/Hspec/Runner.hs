@@ -46,13 +46,13 @@ import           Test.Hspec.Runner.Eval
 -- | Filter specs by given predicate.
 --
 -- The predicate takes a list of "describe" labels and a "requirement".
-filterSpecs :: (Path -> Bool) -> [SpecTree] -> [SpecTree]
+filterSpecs :: (Path -> Bool) -> [SpecTree r] -> [SpecTree r]
 filterSpecs p = goSpecs []
   where
-    goSpecs :: [String] -> [SpecTree] -> [SpecTree]
+    goSpecs :: [String] -> [SpecTree r] -> [SpecTree r]
     goSpecs groups = mapMaybe (goSpec groups)
 
-    goSpec :: [String] -> SpecTree -> Maybe SpecTree
+    goSpec :: [String] -> SpecTree r -> Maybe (SpecTree r)
     goSpec groups spec = case spec of
       SpecItem item -> guard (p (groups, itemRequirement item)) >> return spec
       SpecGroup group specs     -> case goSpecs (groups ++ [group]) specs of
@@ -61,7 +61,7 @@ filterSpecs p = goSpecs []
 
 -- | Run given spec and write a report to `stdout`.
 -- Exit with `exitFailure` if at least one spec item fails.
-hspec :: Spec -> IO ()
+hspec :: SpecM r () -> IO ()
 hspec = hspecWithOptions defaultOptions
 
 -- | This function is used by @hspec-discover@.  It is not part of the public
@@ -82,7 +82,7 @@ ensureSeed c = case configQuickCheckSeed c of
 
 -- | Run given spec with custom options.
 -- This is similar to `hspec`, but more flexible.
-hspecWithOptions :: Options -> Spec -> IO ()
+hspecWithOptions :: Options -> SpecM r () -> IO ()
 hspecWithOptions opts spec = do
   prog <- getProgName
   args <- getArgs
@@ -104,7 +104,7 @@ hspecResult = hspecWith defaultConfig
 -- /Note/: `hspecWith` does not exit with `exitFailure` on failing spec
 -- items.  If you need this, you have to check the `Summary` yourself and act
 -- accordingly.
-hspecWith :: Config -> Spec -> IO Summary
+hspecWith :: Config -> SpecM r () -> IO Summary
 hspecWith c_ spec_ = withHandle c_ $ \h -> do
   c <- ensureSeed c_
   let formatter = configFormatter c
@@ -154,7 +154,7 @@ hspecWith c_ spec_ = withHandle c_ $ \h -> do
 isDumb :: IO Bool
 isDumb = maybe False (== "dumb") <$> lookupEnv "TERM"
 
-markSuccess :: Item -> Item
+markSuccess :: Item r -> Item r
 markSuccess item = item {itemExample = evaluateExample Success}
 
 -- | Summary of a test run.
